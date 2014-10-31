@@ -32,11 +32,10 @@
 #define UP_THRESHOLD		(70)
 #define MIN_ONLINE		(1)
 #define MAX_ONLINE		(4)
-#define DEF_DOWN_TIMER_CNT	(10)	/* 5 secs */
+#define DEF_DOWN_TIMER_CNT	(6)	/* 3 secs */
 #define DEF_UP_TIMER_CNT	(2)	/* 1 sec */
-#define MAX_CORES_SCREENOFF (1)
+#define MAX_CORES_SCREENOFF (2)
 #define MAX_FREQ_SCREENOFF (1190400)
-#define MAX_FREQ_POWERSAVER (1728000)
 #define MAX_FREQ_PLUG (2265600)
 #define MAX_CORES_PLUG (4)
 
@@ -52,9 +51,7 @@ static unsigned int up_timer_cnt = DEF_UP_TIMER_CNT;
 static unsigned int max_cores_screenoff = MAX_CORES_SCREENOFF;
 static unsigned int max_freq_screenoff = MAX_FREQ_SCREENOFF;
 static unsigned int max_freq_plug = MAX_FREQ_PLUG;
-static unsigned int max_freq_plug_fn = MAX_FREQ_PLUG;
 static unsigned int max_cores_plug = MAX_CORES_PLUG;
-static unsigned int powersaver_mode = 0;
 static unsigned int rcrc;
 
 static struct delayed_work dyn_work;
@@ -194,16 +191,12 @@ static __ref void max_screenoff(bool screenoff)
 	if (screenoff) {
 		freq = max_freq_screenoff;
 		
-		if (powersaver_mode)
-			goto freq_set;
-		
 		if (max_cores_screenoff > max_online)
 			max_cores_screenoff = max_online;
 		
 		max_cores_plug = max_online;
 		max_online = max_cores_screenoff;
-
-freq_set:		
+		
 		for_each_online_cpu(cpu) {
 			policy = cpufreq_cpu_get(cpu);
 			
@@ -221,11 +214,8 @@ freq_set:
 	}
 	else {
 		freq = max_freq_plug;
-
-		if (!powersaver_mode) {
-			max_online = max_cores_plug;
-			up_all(true);
-		}
+		max_online = max_cores_plug;
+		up_all(true);
 		
 		for_each_online_cpu(cpu) {
 			policy = cpufreq_cpu_get(cpu);
@@ -238,65 +228,7 @@ freq_set:
 			cpufreq_cpu_put(policy);
 		}
 		
-		if (!powersaver_mode)
-			queue_delayed_work_on(0, dyn_workq, &dyn_work, 0);
-	}
-	
-#if DEBUG
-	pr_debug("%s: num_online_cpus: %u, freq_online_cpus: %u\n", __func__, num_online_cpus(), cpufreq_quick_get_max(0));
-#endif
-}
-
-/* 
- * Manages driver behavior in powersave mode
- * It sets max online CPUs to 1 and max freq to 1728000 Hz
- * Restores previous values on resume work
- *
- */
-static __ref void powersaver_fn(bool mode)
-{
-	unsigned int cpu;
-	uint32_t freq_save;
-	
-	struct cpufreq_policy *policy;
-		
-	if (mode) {	
-		freq_save = MAX_FREQ_POWERSAVER;
-		
-		cancel_delayed_work_sync(&dyn_work);
-
-		for_each_online_cpu(cpu) {
-			policy = cpufreq_cpu_get(cpu);
-			
-			if (freq_save > policy->min && freq_save != policy->max) {
-				max_freq_plug_fn = policy->max;
-				policy->user_policy.max = freq_save;
-				policy->max = freq_save;
-			}
-
-			cpufreq_cpu_put(policy);
-			
-			if (cpu)
-				cpu_down(cpu);
-		}
-	}
-	else {
-		freq_save = max_freq_plug_fn;
-
-		up_all(true);
-		
-		for_each_online_cpu(cpu) {
-			policy = cpufreq_cpu_get(cpu);
-			
-			if (freq_save> policy->min && freq_save != policy->max) {
-				policy->user_policy.max = freq_save;
-				policy->max = freq_save;
-			}
-		
-			cpufreq_cpu_put(policy);
-		}
-		
-		queue_delayed_work_on(0, dyn_workq, &dyn_work, 0);
+		queue_delayed_work_on(0, dyn_workq, &dyn_work, delay);
 	}
 	
 #if DEBUG
@@ -339,7 +271,7 @@ static void blu_plug_input_event(struct input_handle *handle,
 		unsigned int type,
 		unsigned int code, int value)
 {
-	if (num_online_cpus() >= 2 || powersaver_mode)
+	if (num_online_cpus() >= 2)
 		return;
 	
 	if (type == EV_SYN && code == SYN_REPORT)
@@ -546,30 +478,6 @@ static struct kernel_param_ops max_freq_screenoff_ops = {
 };
 
 module_param_cb(max_freq_screenoff, &max_freq_screenoff_ops, &max_freq_screenoff, 0644);
-
-/* powersave_mode enable*/
-static __ref int set_powersaver_mode(const char *val, const struct kernel_param *kp)
-{
-	int ret = 0;
-
-	ret = param_set_bool(val, kp);
-	
-	if (powersaver_mode)
-		powersaver_fn(true);
-	else
-		powersaver_fn(false);
-
-	pr_info("%s: powersaver enabled = %d\n", __func__, powersaver_mode);
-	
-	return ret;
-}
-
-static struct kernel_param_ops powersaver_mode_ops = {
-	.set = set_powersaver_mode,
-	.get = param_get_bool,
-};
-
-module_param_cb(powersaver_mode, &powersaver_mode_ops, &powersaver_mode, 0644);
 
 /* down_timer_cnt */
 static int set_down_timer_cnt(const char *val, const struct kernel_param *kp)
