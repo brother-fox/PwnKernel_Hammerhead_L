@@ -33,7 +33,6 @@
 #include <linux/slab.h>
 #include <linux/kernel_stat.h>
 #include <asm/cputime.h>
-#include <linux/input.h>
 
 static int active_count;
 
@@ -57,7 +56,6 @@ struct cpufreq_interactive_cpuinfo {
 	u64 max_freq_idle_start_time;
 	struct rw_semaphore enable_sem;
 	int governor_enabled;
-	int prev_load;
 };
 
 static DEFINE_PER_CPU(struct cpufreq_interactive_cpuinfo, cpuinfo);
@@ -119,13 +117,6 @@ static int timer_slack_val = DEFAULT_TIMER_SLACK;
 static unsigned int max_freq_hysteresis;
 
 static bool io_is_busy;
-
-/*
- * If the max load among the other CPUs is higher than sync_freq_load_threshold
- * then do not let the frequency to drop below sync_freq
- */
-static unsigned int sync_freq_load_threshold;
-static unsigned int sync_freq;
 
 /*
  * Making sure cpufreq stays low when it needs to stay low
@@ -260,8 +251,6 @@ static void cpufreq_interactive_timer(unsigned long data)
 	unsigned int index;
 	unsigned long flags;
 	bool boosted;
-	int i, max_load_other_cpu;
-	unsigned int max_freq_other_cpu;
 
 	if (!down_read_trylock(&pcpu->enable_sem))
 		return;
@@ -282,24 +271,9 @@ static void cpufreq_interactive_timer(unsigned long data)
 	do_div(cputime_speedadj, delta_time);
 	loadadjfreq = (unsigned int)cputime_speedadj * 100;
 	cpu_load = loadadjfreq / pcpu->target_freq;
-	pcpu->prev_load = cpu_load;
 	boosted = boost_val || now < boostpulse_endtime;
 	
 	cpufreq_notify_utilization(pcpu->policy, cpu_load);
-	
-	max_load_other_cpu = 0;
-	max_freq_other_cpu = 0;
-	for_each_online_cpu(i) {
-		struct cpufreq_interactive_cpuinfo *picpu =
-						&per_cpu(cpuinfo, i);
-		if (i == data)
-			continue;
-		if (max_load_other_cpu < picpu->prev_load)
-			max_load_other_cpu = picpu->prev_load;
-
-		if (picpu->policy->cur > max_freq_other_cpu)
-			max_freq_other_cpu = picpu->policy->cur;
-	}
 	
 	if (cpu_load >= go_hispeed_load || boosted) {
 		if (pcpu->target_freq < hispeed_freq) {
@@ -314,11 +288,6 @@ static void cpufreq_interactive_timer(unsigned long data)
 		new_freq = pcpu->policy->cpuinfo.min_freq;
 	} else {
 		new_freq = calc_freq(pcpu, cpu_load);
-		
-		if (sync_freq && (max_freq_other_cpu > sync_freq) &&
-			(max_load_other_cpu > sync_freq_load_threshold) &&
-				(new_freq < sync_freq))
-			new_freq = sync_freq;
 	}
 
 	if (pcpu->target_freq >= hispeed_freq &&
@@ -371,8 +340,13 @@ static void cpufreq_interactive_timer(unsigned long data)
 		pcpu->floor_validate_time = now;
 	}
 
-	if (pcpu->target_freq == new_freq) {
-		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
+	/* In case actual freq set in target(policy->cur) is not updated
+	 * till next timer interrupt arrives, new_freq remains same as
+	 * actual freq. Don't go for setting same frequency again.
+	 */
+	if (pcpu->target_freq == new_freq
+		&& pcpu->policy->cur == new_freq) {
+	spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
 		goto rearm_if_notmax;
 	}
 
@@ -934,51 +908,6 @@ static ssize_t store_io_is_busy(struct kobject *kobj,
 static struct global_attr io_is_busy_attr = __ATTR(io_is_busy, 0644,
 		show_io_is_busy, store_io_is_busy);
 
-static ssize_t show_sync_freq(struct kobject *kobj,
-			struct attribute *attr, char *buf)
-{
-	return sprintf(buf, "%u\n", sync_freq);
-}
-
-static ssize_t store_sync_freq(struct kobject *kobj,
-			struct attribute *attr, const char *buf, size_t count)
-{
-	int ret;
-	unsigned long val;
-
-	ret = kstrtoul(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-	sync_freq = val;
-	return count;
-}
-
-static struct global_attr sync_freq_attr = __ATTR(sync_freq, 0644,
-		show_sync_freq, store_sync_freq);
-
-static ssize_t show_sync_freq_load_threshold(struct kobject *kobj,
-			struct attribute *attr, char *buf)
-{
-	return sprintf(buf, "%u\n", sync_freq_load_threshold);
-}
-
-static ssize_t store_sync_freq_load_threshold(struct kobject *kobj,
-			struct attribute *attr, const char *buf, size_t count)
-{
-	int ret;
-	unsigned long val;
-
-	ret = kstrtoul(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-	sync_freq_load_threshold = val;
-	return count;
-}
-
-static struct global_attr sync_freq_load_threshold_attr =
-		__ATTR(sync_freq_load_threshold, 0644,
-		show_sync_freq_load_threshold, store_sync_freq_load_threshold);
-
 static struct attribute *interactive_attributes[] = {
 	&above_hispeed_delay_attr.attr,
 	&hispeed_freq_attr.attr,
@@ -991,83 +920,7 @@ static struct attribute *interactive_attributes[] = {
 	&boostpulse_duration.attr,
 	&io_is_busy_attr.attr,
 	&max_freq_hysteresis_attr.attr,
-	&sync_freq_attr.attr,
-	&sync_freq_load_threshold_attr.attr,
 	NULL,
-};
-
-static void interactive_input_event(struct input_handle *handle,
-		unsigned int type,
-		unsigned int code, int value)
-{
-	if (type == EV_SYN && code == SYN_REPORT) {
-		boostpulse_endtime = ktime_to_us(ktime_get()) +
-			boostpulse_duration_val;
-		cpufreq_interactive_boost();
-	}
-}
-
-static int interactive_input_connect(struct input_handler *handler,
-		struct input_dev *dev, const struct input_device_id *id)
-{
-	struct input_handle *handle;
-	int error;
-
-	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
-	if (!handle)
-		return -ENOMEM;
-
-	handle->dev = dev;
-	handle->handler = handler;
-	handle->name = "cpufreq";
-
-	error = input_register_handle(handle);
-	if (error)
-		goto err2;
-
-	error = input_open_device(handle);
-	if (error)
-		goto err1;
-
-	return 0;
-err1:
-	input_unregister_handle(handle);
-err2:
-	kfree(handle);
-	return error;
-}
-
-static void interactive_input_disconnect(struct input_handle *handle)
-{
-	input_close_device(handle);
-	input_unregister_handle(handle);
-	kfree(handle);
-}
-
-static const struct input_device_id interactive_ids[] = {
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
-			 INPUT_DEVICE_ID_MATCH_ABSBIT,
-		.evbit = { BIT_MASK(EV_ABS) },
-		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
-			    BIT_MASK(ABS_MT_POSITION_X) |
-			    BIT_MASK(ABS_MT_POSITION_Y) },
-	}, /* multi-touch touchscreen */
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT |
-			 INPUT_DEVICE_ID_MATCH_ABSBIT,
-		.keybit = { [BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH) },
-		.absbit = { [BIT_WORD(ABS_X)] =
-			    BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) },
-	}, /* touchpad */
-};
-
-static struct input_handler interactive_input_handler = {
-	.event		= interactive_input_event,
-	.connect	= interactive_input_connect,
-	.disconnect	= interactive_input_disconnect,
-	.name		= "blu_active",
-	.id_table	= interactive_ids,
 };
 
 static struct attribute_group interactive_attr_group = {
@@ -1243,7 +1096,7 @@ static void cpufreq_interactive_nop_timer(unsigned long data)
 
 static int __init cpufreq_blu_active_init(void)
 {
-	unsigned int i, rc;
+	unsigned int i;
 	struct cpufreq_interactive_cpuinfo *pcpu;
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
 
@@ -1258,8 +1111,6 @@ static int __init cpufreq_blu_active_init(void)
 		spin_lock_init(&pcpu->load_lock);
 		spin_lock_init(&pcpu->target_freq_lock);
 		init_rwsem(&pcpu->enable_sem);
-		if (!i)
-			rc = input_register_handler(&interactive_input_handler);
 	}
 
 	spin_lock_init(&speedchange_cpumask_lock);
@@ -1288,16 +1139,9 @@ module_init(cpufreq_blu_active_init);
 
 static void __exit cpufreq_interactive_exit(void)
 {
-	unsigned int cpu;
-	
 	cpufreq_unregister_governor(&cpufreq_gov_blu_active);
 	kthread_stop(speedchange_task);
 	put_task_struct(speedchange_task);
-	
-	for_each_possible_cpu(cpu) {
-		if(!cpu)
-			input_unregister_handler(&interactive_input_handler);
-	}
 }
 
 module_exit(cpufreq_interactive_exit);
