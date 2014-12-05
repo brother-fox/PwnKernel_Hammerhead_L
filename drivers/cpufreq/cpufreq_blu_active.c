@@ -96,16 +96,6 @@ static spinlock_t above_hispeed_delay_lock;
 static unsigned int *above_hispeed_delay = default_above_hispeed_delay;
 static int nabove_hispeed_delay = ARRAY_SIZE(default_above_hispeed_delay);
 
-<<<<<<< HEAD
-/* Non-zero means indefinite speed boost active */
-static int boost_val;
-/* Duration of a boot pulse in usecs */
-static int boostpulse_duration_val = DEFAULT_MIN_SAMPLE_TIME;
-/* End time of boost pulse in ktime converted to usecs */
-static u64 boostpulse_endtime;
-
-=======
->>>>>>> upstream/code_blue-l-beta
 /*
  * Max additional time to wait in idle, beyond timer_rate, at speeds above
  * minimum before wakeup to reduce speed, or -1 if unnecessary.
@@ -114,8 +104,6 @@ static u64 boostpulse_endtime;
 static int timer_slack_val = DEFAULT_TIMER_SLACK;
 
 /*
-<<<<<<< HEAD
-=======
  * Whether to align timer windows across all CPUs. When
  * use_sched_load is true, this flag is ignored and windows
  * will always be aligned.
@@ -123,7 +111,6 @@ static int timer_slack_val = DEFAULT_TIMER_SLACK;
 static bool align_windows = true;
 
 /*
->>>>>>> upstream/code_blue-l-beta
  * Stay at max freq for at least max_freq_hysteresis before dropping
  * frequency.
  */
@@ -140,11 +127,6 @@ static bool io_is_busy;
 static u64 round_to_nw_start(u64 jif)
 {
 	unsigned long step = usecs_to_jiffies(timer_rate);
-<<<<<<< HEAD
-
-	do_div(jif, step);
-	return (jif + 1) * step;
-=======
 	u64 ret;
 
 	if (align_windows) {
@@ -155,7 +137,6 @@ static u64 round_to_nw_start(u64 jif)
 	}
 
 	return ret;
->>>>>>> upstream/code_blue-l-beta
 }
 
 static void cpufreq_interactive_timer_resched(unsigned long cpu)
@@ -276,10 +257,6 @@ static void cpufreq_interactive_timer(unsigned long data)
 	unsigned int loadadjfreq;
 	unsigned int index;
 	unsigned long flags;
-<<<<<<< HEAD
-	bool boosted;
-=======
->>>>>>> upstream/code_blue-l-beta
 
 	if (!down_read_trylock(&pcpu->enable_sem))
 		return;
@@ -299,22 +276,13 @@ static void cpufreq_interactive_timer(unsigned long data)
 	spin_lock_irqsave(&pcpu->target_freq_lock, flags);
 	do_div(cputime_speedadj, delta_time);
 	loadadjfreq = (unsigned int)cputime_speedadj * 100;
-<<<<<<< HEAD
-	cpu_load = loadadjfreq / pcpu->target_freq;
-	boosted = boost_val || now < boostpulse_endtime;
-	
-	cpufreq_notify_utilization(pcpu->policy, cpu_load);
-	
-	if (cpu_load >= go_hispeed_load || boosted) {
-		if (pcpu->target_freq < hispeed_freq) {
-=======
+
 	cpu_load = loadadjfreq / pcpu->policy->cur;
 	
 	cpufreq_notify_utilization(pcpu->policy, cpu_load);
 	
 	if (cpu_load >= go_hispeed_load) {
 		if (pcpu->policy->cur < hispeed_freq) {
->>>>>>> upstream/code_blue-l-beta
 			new_freq = hispeed_freq;
 		} else {
 			new_freq = calc_freq(pcpu, cpu_load);
@@ -328,24 +296,14 @@ static void cpufreq_interactive_timer(unsigned long data)
 		new_freq = calc_freq(pcpu, cpu_load);
 	}
 
-<<<<<<< HEAD
-	if (pcpu->target_freq >= hispeed_freq &&
-	    new_freq > pcpu->target_freq &&
-=======
 	if (pcpu->policy->cur >= hispeed_freq &&
 	    new_freq > pcpu->policy->cur &&
->>>>>>> upstream/code_blue-l-beta
 	    now - pcpu->hispeed_validate_time <
 	    freq_to_above_hispeed_delay(pcpu->target_freq)) {
 		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
 		goto rearm;
 	}
 
-<<<<<<< HEAD
-	pcpu->hispeed_validate_time = now;
-
-=======
->>>>>>> upstream/code_blue-l-beta
 	if (cpufreq_frequency_table_target(pcpu->policy, pcpu->freq_table,
 					   new_freq, CPUFREQ_RELATION_L,
 					   &index)) {
@@ -381,27 +339,13 @@ static void cpufreq_interactive_timer(unsigned long data)
 	 * (or the indefinite boost is turned off).
 	 */
 
-<<<<<<< HEAD
-	if (!boosted || new_freq > hispeed_freq) {
-=======
 	if (new_freq > hispeed_freq) {
->>>>>>> upstream/code_blue-l-beta
 		pcpu->floor_freq = new_freq;
 		pcpu->floor_validate_time = now;
 	}
 
-<<<<<<< HEAD
-	/* In case actual freq set in target(policy->cur) is not updated
-	 * till next timer interrupt arrives, new_freq remains same as
-	 * actual freq. Don't go for setting same frequency again.
-	 */
-	if (pcpu->target_freq == new_freq
-		&& pcpu->policy->cur == new_freq) {
-	spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
-=======
 	if (pcpu->target_freq == new_freq) {
 		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
->>>>>>> upstream/code_blue-l-beta
 		goto rearm_if_notmax;
 	}
 
@@ -532,10 +476,7 @@ static int cpufreq_interactive_speedchange_task(void *data)
 		for_each_cpu(cpu, &tmp_mask) {
 			unsigned int j;
 			unsigned int max_freq = 0;
-<<<<<<< HEAD
-=======
 			struct cpufreq_interactive_cpuinfo *pjcpu;
->>>>>>> upstream/code_blue-l-beta
 
 			pcpu = &per_cpu(cpuinfo, cpu);
 			if (!down_read_trylock(&pcpu->enable_sem))
@@ -546,23 +487,12 @@ static int cpufreq_interactive_speedchange_task(void *data)
 			}
 
 			for_each_cpu(j, pcpu->policy->cpus) {
-<<<<<<< HEAD
-				struct cpufreq_interactive_cpuinfo *pjcpu =
-					&per_cpu(cpuinfo, j);
-=======
 				pjcpu = &per_cpu(cpuinfo, j);
->>>>>>> upstream/code_blue-l-beta
 
 				if (pjcpu->target_freq > max_freq)
 					max_freq = pjcpu->target_freq;
 			}
 
-<<<<<<< HEAD
-			if (max_freq != pcpu->policy->cur)
-				__cpufreq_driver_target(pcpu->policy,
-							max_freq,
-							CPUFREQ_RELATION_H);
-=======
 			if (max_freq != pcpu->policy->cur) {
 				u64 now;
 				__cpufreq_driver_target(pcpu->policy,
@@ -574,7 +504,6 @@ static int cpufreq_interactive_speedchange_task(void *data)
 					pjcpu->hispeed_validate_time = now;
 				}
 			}
->>>>>>> upstream/code_blue-l-beta
 
 			up_read(&pcpu->enable_sem);
 		}
@@ -583,45 +512,6 @@ static int cpufreq_interactive_speedchange_task(void *data)
 	return 0;
 }
 
-<<<<<<< HEAD
-static void cpufreq_interactive_boost(void)
-{
-	int i;
-	int anyboost = 0;
-	unsigned long flags[2];
-	struct cpufreq_interactive_cpuinfo *pcpu;
-
-	spin_lock_irqsave(&speedchange_cpumask_lock, flags[0]);
-
-	for_each_online_cpu(i) {
-		pcpu = &per_cpu(cpuinfo, i);
-		spin_lock_irqsave(&pcpu->target_freq_lock, flags[1]);
-		if (pcpu->target_freq < hispeed_freq) {
-			pcpu->target_freq = hispeed_freq;
-			cpumask_set_cpu(i, &speedchange_cpumask);
-			pcpu->hispeed_validate_time =
-				ktime_to_us(ktime_get());
-			anyboost = 1;
-		}
-
-		/*
-		 * Set floor freq and (re)start timer for when last
-		 * validated.
-		 */
-
-		pcpu->floor_freq = hispeed_freq;
-		pcpu->floor_validate_time = ktime_to_us(ktime_get());
-		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags[1]);
-	}
-
-	spin_unlock_irqrestore(&speedchange_cpumask_lock, flags[0]);
-
-	if (anyboost)
-		wake_up_process(speedchange_task);
-}
-
-=======
->>>>>>> upstream/code_blue-l-beta
 static int cpufreq_interactive_notifier(
 	struct notifier_block *nb, unsigned long val, void *data)
 {
@@ -800,8 +690,6 @@ static ssize_t store_max_freq_hysteresis(struct kobject *kobj,
 static struct global_attr max_freq_hysteresis_attr =
 	__ATTR(max_freq_hysteresis, 0644, show_max_freq_hysteresis,
 		store_max_freq_hysteresis);
-<<<<<<< HEAD
-=======
 
 static ssize_t show_align_windows(struct kobject *kobj,
 				     struct attribute *attr, char *buf)
@@ -824,7 +712,6 @@ static ssize_t store_align_windows(struct kobject *kobj,
 
 static struct global_attr align_windows_attr = __ATTR(align_windows, 0644,
 		show_align_windows, store_align_windows);
->>>>>>> upstream/code_blue-l-beta
 		
 static ssize_t show_go_hispeed_load(struct kobject *kobj,
 				     struct attribute *attr, char *buf)
@@ -921,79 +808,7 @@ static ssize_t store_timer_slack(
 
 define_one_global_rw(timer_slack);
 
-<<<<<<< HEAD
-static ssize_t show_boost(struct kobject *kobj, struct attribute *attr,
-			  char *buf)
-{
-	return sprintf(buf, "%d\n", boost_val);
-}
 
-static ssize_t store_boost(struct kobject *kobj, struct attribute *attr,
-			   const char *buf, size_t count)
-{
-	int ret;
-	unsigned long val;
-
-	ret = kstrtoul(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-
-	boost_val = val;
-
-	if (boost_val) {
-		cpufreq_interactive_boost();
-	} else {
-		boostpulse_endtime = ktime_to_us(ktime_get());
-	}
-
-	return count;
-}
-
-define_one_global_rw(boost);
-
-static ssize_t store_boostpulse(struct kobject *kobj, struct attribute *attr,
-				const char *buf, size_t count)
-{
-	int ret;
-	unsigned long val;
-
-	ret = kstrtoul(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-
-	boostpulse_endtime = ktime_to_us(ktime_get()) + boostpulse_duration_val;
-	cpufreq_interactive_boost();
-	return count;
-}
-
-static struct global_attr boostpulse =
-	__ATTR(boostpulse, 0200, NULL, store_boostpulse);
-
-static ssize_t show_boostpulse_duration(
-	struct kobject *kobj, struct attribute *attr, char *buf)
-{
-	return sprintf(buf, "%d\n", boostpulse_duration_val);
-}
-
-static ssize_t store_boostpulse_duration(
-	struct kobject *kobj, struct attribute *attr, const char *buf,
-	size_t count)
-{
-	int ret;
-	unsigned long val;
-
-	ret = kstrtoul(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-
-	boostpulse_duration_val = val;
-	return count;
-}
-
-define_one_global_rw(boostpulse_duration);
-
-=======
->>>>>>> upstream/code_blue-l-beta
 static ssize_t show_io_is_busy(struct kobject *kobj,
 			struct attribute *attr, char *buf)
 {
@@ -1023,17 +838,9 @@ static struct attribute *interactive_attributes[] = {
 	&min_sample_time_attr.attr,
 	&timer_rate_attr.attr,
 	&timer_slack.attr,
-<<<<<<< HEAD
-	&boost.attr,
-	&boostpulse.attr,
-	&boostpulse_duration.attr,
-	&io_is_busy_attr.attr,
-	&max_freq_hysteresis_attr.attr,
-=======
 	&io_is_busy_attr.attr,
 	&max_freq_hysteresis_attr.attr,
 	&align_windows_attr.attr,
->>>>>>> upstream/code_blue-l-beta
 	NULL,
 };
 
