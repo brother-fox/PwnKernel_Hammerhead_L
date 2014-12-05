@@ -379,6 +379,11 @@ int kthread_park(struct task_struct *k)
 			if (k != current) {
 				wake_up_process(k);
 				wait_for_completion(&kthread->parked);
+<<<<<<< HEAD
+=======
+				while (k->state != TASK_PARKED)
+					cond_resched();
+>>>>>>> upstream/code_blue-l-beta
 			}
 		}
 		ret = 0;
@@ -534,7 +539,11 @@ static void insert_kthread_work(struct kthread_worker *worker,
 
 	list_add_tail(&work->node, pos);
 	work->worker = worker;
+<<<<<<< HEAD
 	if (likely(worker->task))
+=======
+	if (!worker->current_work && likely(worker->task))
+>>>>>>> upstream/code_blue-l-beta
 		wake_up_process(worker->task);
 }
 

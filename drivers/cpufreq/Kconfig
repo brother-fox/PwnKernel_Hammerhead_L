@@ -237,8 +237,13 @@ config CPU_BOOST
 	  events it reacts to are:
 	  - Migration of important threads from one CPU to another.
 
+<<<<<<< HEAD
 	  If in doubt, say N.
 
+=======
+	  If in doubt, say N.	
+	  
+>>>>>>> upstream/code_blue-l-beta
 menu "x86 CPU frequency scaling drivers"
 depends on X86
 source "drivers/cpufreq/Kconfig.x86"

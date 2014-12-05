@@ -266,16 +266,23 @@ static void cpuboost_input_event(struct input_handle *handle,
 {
 	u64 now;
 
+<<<<<<< HEAD
 	if (!input_boost_freq)
+=======
+	if (!input_boost_freq || work_pending(&input_boost_work))
+>>>>>>> upstream/code_blue-l-beta
 		return;
 
 	now = ktime_to_us(ktime_get());
 	if (now - last_input_time < (input_boost_ms * USEC_PER_MSEC))
 		return;
 
+<<<<<<< HEAD
 	if (work_pending(&input_boost_work))
 		return;
 
+=======
+>>>>>>> upstream/code_blue-l-beta
 	queue_work(cpu_boost_wq, &input_boost_work);
 	last_input_time = ktime_to_us(ktime_get());
 }
@@ -318,7 +325,10 @@ static void cpuboost_input_disconnect(struct input_handle *handle)
 }
 
 static const struct input_device_id cpuboost_ids[] = {
+<<<<<<< HEAD
 	/* multi-touch touchscreen */
+=======
+>>>>>>> upstream/code_blue-l-beta
 	{
 		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
 			INPUT_DEVICE_ID_MATCH_ABSBIT,
@@ -326,20 +336,28 @@ static const struct input_device_id cpuboost_ids[] = {
 		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
 			BIT_MASK(ABS_MT_POSITION_X) |
 			BIT_MASK(ABS_MT_POSITION_Y) },
+<<<<<<< HEAD
 	},
 	/* touchpad */
+=======
+	}, /* multi-touch touchscreen */
+>>>>>>> upstream/code_blue-l-beta
 	{
 		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT |
 			INPUT_DEVICE_ID_MATCH_ABSBIT,
 		.keybit = { [BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH) },
 		.absbit = { [BIT_WORD(ABS_X)] =
 			BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) },
+<<<<<<< HEAD
 	},
 	/* Keypad */
 	{
 		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
 		.evbit = { BIT_MASK(EV_KEY) },
 	},
+=======
+	}, /* touchpad */
+>>>>>>> upstream/code_blue-l-beta
 	{ },
 };
 
