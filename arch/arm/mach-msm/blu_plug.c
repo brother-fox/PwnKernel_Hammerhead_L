@@ -23,6 +23,7 @@
 #include <linux/timer.h>
 #include <linux/lcd_notify.h>
 #include <linux/cpufreq.h>
+#include <mach/cpufreq.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/input.h>
@@ -34,7 +35,7 @@
 #define MAX_ONLINE		(4)
 #define DEF_DOWN_TIMER_CNT	(6)	/* 3 secs */
 #define DEF_UP_TIMER_CNT	(2)	/* 1 sec */
-#define MAX_CORES_SCREENOFF (2)
+#define MAX_CORES_SCREENOFF (1)
 #define MAX_FREQ_SCREENOFF (1190400)
 #define MAX_FREQ_PLUG (2265600)
 #define MAX_CORES_PLUG (4)
@@ -52,6 +53,7 @@ static unsigned int max_cores_screenoff = MAX_CORES_SCREENOFF;
 static unsigned int max_freq_screenoff = MAX_FREQ_SCREENOFF;
 static unsigned int max_freq_plug = MAX_FREQ_PLUG;
 static unsigned int max_cores_plug = MAX_CORES_PLUG;
+bool prevsaver = false;
 static unsigned int rcrc;
 
 static struct delayed_work dyn_work;
@@ -183,56 +185,59 @@ static __ref void load_timer(struct work_struct *work)
  */
 static __ref void max_screenoff(bool screenoff)
 {
-	unsigned int cpu;
-	uint32_t freq;
-	
-	struct cpufreq_policy *policy;
+	uint32_t cpu, freq;
 	
 	if (screenoff) {
-		freq = max_freq_screenoff;
+		max_freq_plug = cpufreq_quick_get_max(0);
 		
-		if (max_cores_screenoff > max_online)
-			max_cores_screenoff = max_online;
-		
-		max_cores_plug = max_online;
-		max_online = max_cores_screenoff;
-		
-		for_each_online_cpu(cpu) {
-			policy = cpufreq_cpu_get(cpu);
+		if (max_freq_plug == 729600) {
+			freq = 729600;
+			max_online = 1;
+			prevsaver = true;
+		}
+		else {
+			freq = max_freq_screenoff;
 			
-			if (freq > policy->min && freq != policy->max) {
-				max_freq_plug = policy->max;
-				policy->user_policy.max = freq;
-				policy->max = freq;
+			if (max_cores_plug > max_online && prevsaver) {
+				max_online = max_cores_plug;
+				prevsaver = false;
 			}
-
-			cpufreq_cpu_put(policy);
+			else
+				max_cores_plug = max_online;
+				
+			max_online = max_cores_screenoff;
+		}
+		
+		for_each_possible_cpu(cpu) {
+			msm_cpufreq_set_freq_limits(cpu, MSM_CPUFREQ_NO_LIMIT, freq);
 			
-			if (cpu && num_online_cpus() > max_cores_screenoff)
+			if (cpu && num_online_cpus() > max_online)
 				cpu_down(cpu);
 		}
+		cpufreq_update_policy(cpu);
 	}
 	else {
-		freq = max_freq_plug;
-		max_online = max_cores_plug;
+		if (max_freq_plug == 729600) {
+			freq = 729600;
+			max_online = 2;
+		}
+		else {
+			freq = max_freq_plug;
+			max_online = max_cores_plug;
+		}
+		
 		up_all(true);
 		
-		for_each_online_cpu(cpu) {
-			policy = cpufreq_cpu_get(cpu);
-			
-			if (freq > policy->min && freq != policy->max) {
-				policy->user_policy.max = freq;
-				policy->max = freq;
-			}
-		
-			cpufreq_cpu_put(policy);
+		for_each_possible_cpu(cpu) {
+			msm_cpufreq_set_freq_limits(cpu, MSM_CPUFREQ_NO_LIMIT, freq);
 		}
+		cpufreq_update_policy(cpu);
 		
 		queue_delayed_work_on(0, dyn_workq, &dyn_work, delay);
 	}
 	
 #if DEBUG
-	pr_debug("%s: num_online_cpus: %u, freq_online_cpus: %u\n", __func__, num_online_cpus(), cpufreq_quick_get_max(0));
+	pr_debug("%s: num_online_cpus: %u, freq_online_cpus: %u\n", __func__, num_online_cpus(), freq);
 #endif
 }
 
@@ -435,8 +440,8 @@ static __ref int set_max_cores_screenoff(const char *val, const struct kernel_pa
 		return -EINVAL;
 	if (i < 1 || i > num_possible_cpus())
 		return -EINVAL;
-	if (i > min_online)
-		max_cores_screenoff = min_online;
+	if (i > max_online)
+		max_cores_screenoff = max_online;
 
 	ret = param_set_uint(val, kp);
 	
