@@ -52,7 +52,8 @@ struct cpufreq_interactive_cpuinfo {
 	unsigned int floor_freq;
 	unsigned int max_freq;
 	u64 floor_validate_time;
-	u64 hispeed_validate_time;
+	u64 hispeed_validate_time; /* cluster hispeed_validate_time */
+	u64 local_hvtime; /* per-cpu hispeed_validate_time */
 	u64 max_freq_idle_start_time;
 	struct rw_semaphore enable_sem;
 	int governor_enabled;
@@ -288,6 +289,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 		goto rearm;
 	}
 
+	pcpu->local_hvtime = now;
 	if (cpufreq_frequency_table_target(pcpu->policy, pcpu->freq_table,
 					   new_freq, CPUFREQ_RELATION_H,
 					   &index)) {
@@ -462,6 +464,7 @@ static int cpufreq_interactive_speedchange_task(void *data)
 			unsigned int j;
 			unsigned int max_freq = 0;
 			struct cpufreq_interactive_cpuinfo *pjcpu;
+			u64 hvt;
 
 			pcpu = &per_cpu(cpuinfo, cpu);
 			if (!down_read_trylock(&pcpu->enable_sem))
@@ -474,20 +477,22 @@ static int cpufreq_interactive_speedchange_task(void *data)
 			for_each_cpu(j, pcpu->policy->cpus) {
 				pjcpu = &per_cpu(cpuinfo, j);
 
-				if (pjcpu->target_freq > max_freq)
+				if (pjcpu->target_freq > max_freq) {
 					max_freq = pjcpu->target_freq;
+					hvt = pjcpu->local_hvtime;
+				} else if (pjcpu->target_freq == max_freq) {
+					hvt = min(hvt, pjcpu->local_hvtime);
+				}
 			}
 
 
 			if (max_freq != pcpu->policy->cur) {
-				u64 now;
 				__cpufreq_driver_target(pcpu->policy,
 							max_freq,
 							CPUFREQ_RELATION_H);
-				now = ktime_to_us(ktime_get());
 				for_each_cpu(j, pcpu->policy->cpus) {
 					pjcpu = &per_cpu(cpuinfo, j);
-					pjcpu->hispeed_validate_time = now;
+					pjcpu->hispeed_validate_time = hvt;
 				}
 			}
 
@@ -592,6 +597,7 @@ static int thread_migration_notify(struct notifier_block *nb,
 				unsigned long target_cpu, void *arg)
 {
 	unsigned long flags;
+	unsigned int boost_freq;
 	unsigned int sync_freq = 1036800;
 	struct cpufreq_interactive_cpuinfo *target, *source;
 	target = &per_cpu(cpuinfo, target_cpu);
@@ -604,12 +610,14 @@ static int thread_migration_notify(struct notifier_block *nb,
 	if ((int)arg == target_cpu)
 		return NOTIFY_OK;
 
+	if (source->policy->util <= 10)
+		return NOTIFY_OK;
+
 	if (source->policy->cur > target->policy->cur)
 	{
-		if (source->policy->cur > sync_freq)
-			sync_freq = source->policy->cur;
+		boost_freq = max(sync_freq, source->policy->cur);
 
-		target->target_freq = sync_freq;
+		target->target_freq = boost_freq;
 
 		spin_lock_irqsave(&speedchange_cpumask_lock, flags);
 		cpumask_set_cpu(target_cpu, &speedchange_cpumask);
@@ -1021,6 +1029,7 @@ static int cpufreq_governor_blu_active(struct cpufreq_policy *policy,
 				ktime_to_us(ktime_get());
 			pcpu->hispeed_validate_time =
 				pcpu->floor_validate_time;
+			pcpu->local_hvtime = pcpu->floor_validate_time;
 			pcpu->max_freq = policy->max;
 			down_write(&pcpu->enable_sem);
 			del_timer_sync(&pcpu->cpu_timer);
